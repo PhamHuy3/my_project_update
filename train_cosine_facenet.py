@@ -150,28 +150,3 @@ def convert_to_tflite_int8(keras_model, out_file="facenet_mcu_int8.tflite"):
     return out_file
 
 tflite_int8 = convert_to_tflite_int8(base_model, out_file="facenet_mcu_int8.tflite")
-
-
-# Quick validate
-def quick_validate(tflite_path):
-    interpreter = tf.lite.Interpreter(model_path=tflite_path)
-    interpreter.allocate_tensors()
-    input_details = interpreter.get_input_details()
-    output_details = interpreter.get_output_details()
-    sample = next(representative_data_gen(DATA_DIR, num_samples=1))[0]
-    if input_details[0]['dtype'] == np.int8:
-        scale, zp = input_details[0]['quantization']
-        sample_q = (sample / scale + zp).round().astype(np.int8)
-        interpreter.set_tensor(input_details[0]['index'], sample_q)
-    else:
-        interpreter.set_tensor(input_details[0]['index'], sample.astype(np.float32))
-    interpreter.invoke()
-    out = interpreter.get_tensor(output_details[0]['index'])
-    print("[INFO] Quick validate output shape:", out.shape)
-
-try:
-    quick_validate(tflite_int8)
-except Exception as e:
-    print("[WARN] Quick validate failed:", e)
-
-print("[DONE] Files: facenet_mcu_base.h5, facenet_mcu_int8.tflite, facenet_mcu_fp16.tflite")
