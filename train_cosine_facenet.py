@@ -5,11 +5,11 @@ import numpy as np
 import os, random
 from pathlib import Path
 
-# ----------------- CẤU HÌNH -----------------
+# CẤU HÌNH
 IMG_SIZE = (112, 112)
 BATCH_SIZE = 16
 EPOCHS = 60
-DATA_DIR = "data_aligned"   # expects subfolders "chu_nha" and "nguoi_la"
+DATA_DIR = "data_aligned"
 EMBED_DIM = 512
 MARGIN = 0.5
 REP_SAMPLES = 1000
@@ -19,7 +19,7 @@ random.seed(SEED)
 np.random.seed(SEED)
 tf.random.set_seed(SEED)
 
-# ----------------- Mô hình tối giản, tương thích MCU -----------------
+# Mô hình đơn giản
 def build_facenet_mcu(img_size=IMG_SIZE, emb_dim=EMBED_DIM):
     inp = layers.Input((*img_size, 3), name="input_image")
 
@@ -54,7 +54,7 @@ def build_facenet_mcu(img_size=IMG_SIZE, emb_dim=EMBED_DIM):
 
 base_model = build_facenet_mcu()
 
-# ----------------- Cosine embedding loss -----------------
+# Cosine embedding loss
 def cosine_embedding_loss(y_true, y_pred, margin=MARGIN):
     emb_dim = tf.shape(y_pred)[1] // 2
     emb1 = y_pred[:, :emb_dim]
@@ -70,7 +70,7 @@ def cosine_embedding_loss(y_true, y_pred, margin=MARGIN):
     loss = tf.where(y_true > 0, pos_loss, neg_loss)
     return tf.reduce_mean(loss)
 
-# ----------------- Pair batch generator -----------------
+# Pair batch generator
 def load_pair_batch(data_dir, batch_size=BATCH_SIZE):
     data_dir = Path(data_dir)
     chu_nha = list((data_dir / "chu_nha").glob("*.*"))
@@ -100,7 +100,7 @@ def load_pair_batch(data_dir, batch_size=BATCH_SIZE):
             labels.append(label)
         yield [np.array(imgs1), np.array(imgs2)], np.array(labels).reshape(-1,1)
 
-# ----------------- Siamese model -----------------
+# Siamese model
 input1 = layers.Input(shape=(*IMG_SIZE, 3), name="in1")
 input2 = layers.Input(shape=(*IMG_SIZE, 3), name="in2")
 emb1 = base_model(input1)
@@ -110,18 +110,18 @@ siamese = models.Model(inputs=[input1, input2], outputs=merged)
 
 siamese.compile(optimizer=tf.keras.optimizers.Adam(1e-4), loss=cosine_embedding_loss)
 
-# ----------------- Train -----------------
+# Train
 train_gen = load_pair_batch(DATA_DIR, batch_size=BATCH_SIZE)
 steps_per_epoch = 30
 
 print("[INFO] Training model...")
 siamese.fit(train_gen, steps_per_epoch=steps_per_epoch, epochs=EPOCHS, verbose=1)
 
-# ----------------- Save base model -----------------
+# Save base model
 base_model.save("facenet_mcu_base.h5")
 print("[INFO] Saved Keras base model 'facenet_mcu_base.h5'")
 
-# ----------------- Representative dataset for quantization -----------------
+# Representative dataset for quantization
 def representative_data_gen(data_dir=DATA_DIR, num_samples=REP_SAMPLES):
     data_dir = Path(data_dir)
     all_images = list((data_dir / "chu_nha").glob("*.*")) + list((data_dir / "nguoi_la").glob("*.*"))
@@ -135,7 +135,7 @@ def representative_data_gen(data_dir=DATA_DIR, num_samples=REP_SAMPLES):
         arr = np.expand_dims(arr.astype(np.float32), axis=0)
         yield [arr]
 
-# ----------------- Convert to TFLite FULL INT8 -----------------
+# Convert to TFLite INT8
 def convert_to_tflite_int8(keras_model, out_file="facenet_mcu_int8.tflite"):
     converter = tf.lite.TFLiteConverter.from_keras_model(keras_model)
     converter.optimizations = [tf.lite.Optimize.DEFAULT]
@@ -151,43 +151,8 @@ def convert_to_tflite_int8(keras_model, out_file="facenet_mcu_int8.tflite"):
 
 tflite_int8 = convert_to_tflite_int8(base_model, out_file="facenet_mcu_int8.tflite")
 
-# ----------------- Optional FP16 fallback -----------------
-def convert_to_tflite_float16(keras_model, out_file="facenet_mcu_fp16.tflite"):
-    converter = tf.lite.TFLiteConverter.from_keras_model(keras_model)
-    converter.optimizations = [tf.lite.Optimize.DEFAULT]
-    converter.target_spec.supported_types = [tf.float16]
-    tflite_model = converter.convert()
-    with open(out_file, "wb") as f:
-        f.write(tflite_model)
-    print(f"[INFO] Saved FP16 tflite: {out_file}")
-    return out_file
 
-tflite_fp16 = convert_to_tflite_float16(base_model, out_file="facenet_mcu_fp16.tflite")
-
-# ----------------- Export C header for embedding into STM32 project -----------------
-def tflite_to_c_header(tflite_file, header_file="facenet_mcu_int8_model.h", array_name="facenet_mcu_model"):
-    with open(tflite_file, "rb") as f:
-        data = f.read()
-    # write as unsigned char array
-    with open(header_file, "w") as h:
-        h.write("// Auto-generated from " + os.path.basename(tflite_file) + "\n")
-        h.write("#ifndef " + array_name.upper() + "_H\n")
-        h.write("#define " + array_name.upper() + "_H\n\n")
-        h.write(f"const unsigned char {array_name}[] = {{\n")
-        for i, b in enumerate(data):
-            if i % 12 == 0:
-                h.write("  ")
-            h.write(str(b) + ",")
-            if (i + 1) % 12 == 0:
-                h.write("\n")
-        h.write("\n};\n")
-        h.write(f"const unsigned int {array_name}_len = {len(data)};\n\n")
-        h.write("#endif\n")
-    print(f"[INFO] Wrote C header: {header_file}")
-
-tflite_to_c_header("facenet_mcu_int8.tflite", header_file="facenet_mcu_int8_model.h", array_name="facenet_mcu_model")
-
-# ----------------- Quick validate -----------------
+# Quick validate
 def quick_validate(tflite_path):
     interpreter = tf.lite.Interpreter(model_path=tflite_path)
     interpreter.allocate_tensors()
@@ -209,4 +174,4 @@ try:
 except Exception as e:
     print("[WARN] Quick validate failed:", e)
 
-print("[DONE] Files: facenet_mcu_base.h5, facenet_mcu_int8.tflite, facenet_mcu_fp16.tflite, facenet_mcu_int8_model.h")
+print("[DONE] Files: facenet_mcu_base.h5, facenet_mcu_int8.tflite, facenet_mcu_fp16.tflite")
