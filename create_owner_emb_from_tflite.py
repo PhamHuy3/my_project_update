@@ -3,13 +3,13 @@ import tensorflow as tf
 import numpy as np
 import cv2, os
 
-MODEL_PATH = "facenet_mcu_int8.tflite"   # hoặc facenet_mcu_fp16.tflite
+MODEL_PATH = "facenet_mcu_int8.tflite"
 DATA_DIR = "data_aligned/chu_nha"
 SAVE_PATH = "owner_embedding.npy"
 
 IMG_SIZE = (112, 112)
 
-# ---------------- Load TFLite model ----------------
+# Load TFLite model
 interpreter = tf.lite.Interpreter(model_path=MODEL_PATH)
 interpreter.allocate_tensors()
 input_details = interpreter.get_input_details()
@@ -44,7 +44,7 @@ def run_tflite(img):
     emb = emb / np.linalg.norm(emb)
     return emb
 
-# ---------------- Create owner embedding ----------------
+# Create owner embedding
 emb_list = []
 
 for fname in os.listdir(DATA_DIR):
